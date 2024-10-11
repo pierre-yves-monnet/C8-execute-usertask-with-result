@@ -1,6 +1,5 @@
 package io.camunda.executewithresult.executor;
 
-import io.camunda.executewithresult.ExecuteApplication;
 import io.camunda.tasklist.CamundaTaskListClient;
 import io.camunda.tasklist.dto.Task;
 import io.camunda.zeebe.client.ZeebeClient;
@@ -15,8 +14,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
-public class TaskWithResult {
-  Logger logger = LoggerFactory.getLogger(ExecuteApplication.class.getName());
+public class WithResultAPI {
+  Logger logger = LoggerFactory.getLogger(WithResultAPI.class.getName());
 
   private final static String PROCESS_VARIABLE_SNITCH = "SNITCH";
 
@@ -29,32 +28,28 @@ public class TaskWithResult {
 
   private boolean useUserTaskAPI = false;
 
-  public TaskWithResult(ZeebeClient zeebeClient, CamundaTaskListClient taskClient, boolean doubleCheck) {
+  HandleMarker handleMarker = new HandleMarker();
+
+  public WithResultAPI(ZeebeClient zeebeClient, CamundaTaskListClient taskClient, boolean doubleCheck) {
     this.zeebeClient = zeebeClient;
     this.taskClient = taskClient;
     this.doubleCheck = doubleCheck;
-  }
 
-  /**
-   * Object returned by the method
-   */
-  public class ExecuteWithResult {
-    public Map<String, Object> processVariables;
-    public boolean taskNotFound = false;
-    public boolean timeOut = false;
-    public long executionTime;
-    public String processInstance;
   }
 
   /**
    * executeTaskWithResult
    *
    * @param userTask            user task to execute
-   * @param timeoutDurationInMs maximum duration time, adter an exeption is returned
-   * @return the process variable
+   * @param assignUser          the user wasn't assign to the user task, so do it
+   * @param userName            userName to execute the user task
+   * @param variables           Variables to update the task at completion
+   * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
+   * @return the result variable
    * @throws Exception
    */
   public ExecuteWithResult executeTaskWithResult(Task userTask,
+                                                 boolean assignUser,
                                                  String userName,
                                                  Map<String, Object> variables,
                                                  long timeoutDurationInMs) throws Exception {
@@ -67,10 +62,11 @@ public class TaskWithResult {
 
     LockObjectTransporter lockObjectTransporter = new LockObjectTransporter();
     lockObjectTransporter.jobKey = jobKey;
-    lockObjectsMap.put(jobKey, lockObjectTransporter);
-
+    synchronized (lockObjectsMap) {
+      lockObjectsMap.put(jobKey, lockObjectTransporter);
+    }
     // Now, create a worker just for this jobKey
-    HandleMarker handleMarker = new HandleMarker();
+    logger.debug("Register worker[{}]", "end-result-" + jobKey);
     JobWorker worker = zeebeClient.newWorker()
         .jobType("end-result-" + jobKey)
         .handler(handleMarker)
@@ -87,7 +83,8 @@ public class TaskWithResult {
     // save the variable jobId
     if (useUserTaskAPI) {
       try {
-        taskClient.claim(userTask.getId(), userName);
+        if (assignUser)
+          taskClient.claim(userTask.getId(), userName);
         taskClient.completeTask(userTask.getId(), userVariables);
       } catch (Exception e) {
         logger.error("Can't complete Task [{}] : {}", userTask.getId(), e);
@@ -96,7 +93,8 @@ public class TaskWithResult {
       }
     } else {
       try {
-        zeebeClient.newUserTaskAssignCommand(Long.valueOf(userTask.getId())).assignee("demo").send().join();
+        if (assignUser)
+          zeebeClient.newUserTaskAssignCommand(Long.valueOf(userTask.getId())).assignee("demo").send().join();
         zeebeClient.newUserTaskCompleteCommand(Long.valueOf(userTask.getId())).variables(userVariables).send().join();
       } catch (Exception e) {
         logger.error("Can't complete Task [{}] : {}", userTask.getId(), e);
@@ -108,10 +106,16 @@ public class TaskWithResult {
     // Now, we block the thread and wait for a result
     lockObjectTransporter.waitForResult(timeoutDurationInMs);
 
-    // we got the result
+    logger.info("Receive answer jobKey[{}] notification? {} inprogress{}", jobKey, lockObjectTransporter.notification,
+        lockObjectsMap.size());
 
+    // we got the result
     // we can close the worker now
     worker.close();
+    synchronized (lockObjectsMap) {
+      lockObjectsMap.remove(jobKey);
+    }
+
     Long endTime = System.currentTimeMillis();
     executeWithResult.processInstance = userTask.getProcessInstanceKey();
     executeWithResult.executionTime = endTime - beginTime;
@@ -142,14 +146,29 @@ public class TaskWithResult {
   }
 
   /**
+   * processInstanceWithResult
+   *
+   * @param processId           processId to start
+   * @param variables           Variables to update the task at completion
+   * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
+   * @return the result status
+   * @throws Exception
+   */
+  public ExecuteWithResult processInstanceWithResult(String processId,
+                                                     Map<String, Object> variables,
+                                                     long timeoutDurationInMs) throws Exception {
+    // To be done
+return null;
+  }
+
+  /**
    * Handle the job. This worker register under the correct topic, and capture when it's come here
    */
   private class HandleMarker implements JobHandler {
     public void handle(JobClient jobClient, ActivatedJob activatedJob) throws Exception {
       // Get the variable "lockKey"
       String jobKey = (String) activatedJob.getVariable("jobKey");
-
-      String type = activatedJob.getType();
+      logger.info("Handle marker for jobKey[{}]", jobKey);
       LockObjectTransporter lockObjectTransporter = lockObjectsMap.get(jobKey);
 
       if (lockObjectTransporter == null) {

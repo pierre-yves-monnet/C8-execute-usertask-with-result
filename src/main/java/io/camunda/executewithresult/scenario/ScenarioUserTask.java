@@ -5,8 +5,8 @@ import io.camunda.common.auth.Product;
 import io.camunda.common.auth.SimpleAuthentication;
 import io.camunda.common.auth.SimpleConfig;
 import io.camunda.common.auth.SimpleCredential;
-import io.camunda.executewithresult.ExecuteApplication;
-import io.camunda.executewithresult.executor.TaskWithResult;
+import io.camunda.executewithresult.executor.ExecuteWithResult;
+import io.camunda.executewithresult.executor.WithResultAPI;
 import io.camunda.executewithresult.worker.DelayWorker;
 import io.camunda.executewithresult.worker.LogWorker;
 import io.camunda.tasklist.CamundaTaskListClient;
@@ -40,6 +40,7 @@ import java.util.stream.Collectors;
 @ConfigurationProperties()
 
 public class ScenarioUserTask {
+  public static final String PROCESS_ID = "executeUserTaskWithResult";
   Logger logger = LoggerFactory.getLogger(ScenarioUserTask.class.getName());
 
   private CamundaTaskListClient taskClient;
@@ -72,7 +73,7 @@ public class ScenarioUserTask {
   @Autowired
   ZeebeClient zeebeClient;
 
-  TaskWithResult taskWithResult;
+  WithResultAPI taskWithResult;
   EngineCommand engineCommand;
 
   List<JobWorker> listWorkers = new ArrayList<>();
@@ -82,6 +83,8 @@ public class ScenarioUserTask {
 
   Set<Long> registerUserTask = new HashSet<>();
 
+  boolean initialisation = false;
+
   /**
    * Initialize all environment
    */
@@ -89,17 +92,18 @@ public class ScenarioUserTask {
     if (!connectionTaskList()) {
       return;
     }
-    taskWithResult = new TaskWithResult(zeebeClient, taskClient, doubleCheck);
+    taskWithResult = new WithResultAPI(zeebeClient, taskClient, doubleCheck);
     engineCommand = new EngineCommand(zeebeClient, taskClient);
     // create workers
     listWorkers.add(DelayWorker.registerWorker(zeebeClient));
     listWorkers.add(LogWorker.registerWorker(zeebeClient));
-
+    initialisation = true;
   }
 
   @Scheduled(fixedDelay = 30000)
   public void execute() {
-
+    if (!initialisation)
+      return;
     numberExecution++;
     try {
       if ("single".equals(modeExecution)) {
@@ -126,7 +130,7 @@ public class ScenarioUserTask {
       int loop = 0;
       while (loop < 10) {
         loop++;
-        TaskList taskList = engineCommand.searchUserTask();
+        TaskList taskList = engineCommand.searchUserTask(PROCESS_ID);
         if (taskList.getItems().isEmpty()) {
           try {
             Thread.sleep(1000);
@@ -148,27 +152,27 @@ public class ScenarioUserTask {
    *
    */
   public void executeMultipleExecution() {
-    logger.info("Synthesis {} queueSize=[{}]", statResult.getSynthesis(), registerUserTask.size());
+    logger.info(">>>>>>>>>>>>>>>>>>>>>>>>>> Synthesis {} queueSize=[{}] <<<<<<<<<<<<<<<<<<<", statResult.getSynthesis(),
+        registerUserTask.size());
 
     try {
 
-      if (registerUserTask.size()<10) {
-        logger.info("------------------- Create 10 process Instances");
-        engineCommand.createProcessInstances("executeUserTaskWithResult",
+      if (registerUserTask.size() < 10) {
+        engineCommand.createProcessInstances(PROCESS_ID,
             Map.of(LogWorker.PROCESS_VARIABLE_PLEASELOG, pleaseLogWorker, DelayWorker.PROCESS_VARIABLE_CREDITSCORE,
-                random.nextInt(1000)), 10, pleaseLogWorker.booleanValue());
+                random.nextInt(1000)), 20, pleaseLogWorker.booleanValue());
       }
 
-      logger.info("------------------- Search for userTask to run");
       TaskList tasksList = null;
-      tasksList = engineCommand.searchUserTask();
+      tasksList = engineCommand.searchUserTask(PROCESS_ID);
       // Register the task: the same task can show up multiple time because of the delay between Zee
+      logger.info("------------------- Search for userTask to run found[{}]", tasksList.size());
 
       for (Task task : tasksList.getItems()) {
         if (registerUserTask.contains(Long.valueOf(task.getId())))
           continue; // already executed
         registerUserTask.add(Long.valueOf(task.getId()));
-        Callable<TaskWithResult.ExecuteWithResult> taskWithResultCallable = () -> {
+        Callable<ExecuteWithResult> taskWithResultCallable = () -> {
           return executeOneTask(task);
           // Use lambda to pass the parameter
         };
@@ -176,8 +180,7 @@ public class ScenarioUserTask {
       }
 
       // Ok, now we can purge the registerUserTask. If the task does not show up in the taskList, we can purge it
-      Set<Long> taskIds = tasksList.getItems().stream()
-          .map(t-> Long.valueOf(t.getId()))  // Get the ID of each Task
+      Set<Long> taskIds = tasksList.getItems().stream().map(t -> Long.valueOf(t.getId()))  // Get the ID of each Task
           .collect(Collectors.toSet());
       registerUserTask.retainAll(taskIds);
 
@@ -189,12 +192,13 @@ public class ScenarioUserTask {
 
   }
 
-  private TaskWithResult.ExecuteWithResult executeOneTask(Task task) throws Exception {
+  private ExecuteWithResult executeOneTask(Task task) throws Exception {
 
     logger.info("Play with task [{}]", task.getId());
     long beginTimeRun = System.currentTimeMillis();
-    TaskWithResult.ExecuteWithResult executeWithResult = taskWithResult.executeTaskWithResult(task, "demo",
+    ExecuteWithResult executeWithResult = taskWithResult.executeTaskWithResult(task, true, "demo",
         Map.of("Cake", "Cherry"), 10000L);
+    long executionTime = System.currentTimeMillis() - beginTimeRun;
 
     // Check the result now
     if (executeWithResult.taskNotFound) {
@@ -209,7 +213,7 @@ public class ScenarioUserTask {
             signature, resultCalculation);
 
     }
-    statResult.addResult(System.currentTimeMillis() - beginTimeRun, !executeWithResult.timeOut);
+    statResult.addResult(executionTime, !executeWithResult.timeOut);
     // Use lambda to pass the parameter
     return executeWithResult;
   }
@@ -247,13 +251,13 @@ public class ScenarioUserTask {
   StatResult statResult = new StatResult();
 
   private class StatResult {
-    public long sumExecution = 0;
+    public long sumExecutionTime = 0;
     public long badExecution = 0;
     public long successExecution = 0;
 
     public synchronized void addResult(long timeExecution, boolean success) {
       if (success) {
-        sumExecution += timeExecution;
+        sumExecutionTime += timeExecution;
         successExecution++;
       } else {
         badExecution++;
@@ -261,8 +265,8 @@ public class ScenarioUserTask {
     }
 
     public String getSynthesis() {
-      return String.format("%1d ms average for %2d executions ",
-          successExecution / (successExecution == 0 ? 1 : successExecution), badExecution);
+      return String.format("%1d ms average for %2d executions (error %d)",
+          sumExecutionTime / (successExecution == 0 ? 1 : successExecution), successExecution, badExecution);
     }
   }
 

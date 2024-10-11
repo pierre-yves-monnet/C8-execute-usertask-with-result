@@ -32,6 +32,6 @@ tasklist:
 usertaskwithresult:
   # single|multiple
   modeExecution: multiple
-  pleaseLogWorker: true
+  pleaseLogWorker: false
   doubleCheck: true
 

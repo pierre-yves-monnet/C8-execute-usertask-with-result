@@ -46,10 +46,10 @@
       <bpmn:outgoing>Flow_1e917mp</bpmn:outgoing>
     </bpmn:serviceTask>
     <bpmn:subProcess id="Activity_1v18plr" triggeredByEvent="true">
-      <bpmn:startEvent id="Event_024icni" name="1 h">
+      <bpmn:startEvent id="Event_024icni" name="10 mn">
         <bpmn:outgoing>Flow_09p2ydx</bpmn:outgoing>
         <bpmn:timerEventDefinition id="TimerEventDefinition_17zkq8u">
-          <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT1H</bpmn:timeDuration>
+          <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT10M</bpmn:timeDuration>
         </bpmn:timerEventDefinition>
       </bpmn:startEvent>
       <bpmn:endEvent id="Event_18jsyje">
@@ -97,7 +97,7 @@
       <bpmndi:BPMNShape id="Event_1dcrs5t_di" bpmnElement="Event_024icni">
         <dc:Bounds x="820" y="462" width="36" height="36" />
         <bpmndi:BPMNLabel>
-          <dc:Bounds x="831" y="505" width="16" height="14" />
+          <dc:Bounds x="824" y="505" width="31" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_18jsyje_di" bpmnElement="Event_18jsyje">

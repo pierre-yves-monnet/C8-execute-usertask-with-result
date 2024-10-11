@@ -38,26 +38,25 @@ public class EngineCommand {
             if (log)
               logger.debug("Create process instance[{}]", t.getProcessInstanceKey());
           }).exceptionally(t -> {
-            logger.error("Error while creating process instance {} ",t);
+            logger.error("Error while creating process instance {} ", t);
             return null;
           });
     }
     logger.info("Created {} process instance sent", number);
   }
 
-  public TaskList searchUserTask() {
-    logger.info("------------------- Search for userTask to run");
+  public TaskList searchUserTask(String processID) {
+    // logger.info("------------------- Search for userTask to run");
     TaskSearch taskSearch = new TaskSearch();
     taskSearch.setState(TaskState.CREATED);
     taskSearch.setAssigned(Boolean.FALSE);
     taskSearch.setWithVariables(true);
-
+    // taskSearch.setProcessDefinitionKey(processID);
     TaskOrderBy taskOrderBy = new TaskOrderBy();
     taskOrderBy.setField(TaskOrderBy.FieldEnum.CREATIONTIME);
     taskOrderBy.setOrder(TaskOrderBy.OrderEnum.DESC);
 
-    Pagination pagination =new Pagination().setPageSize(1000)
-        .setSort(List.of(taskOrderBy));
+    Pagination pagination = new Pagination().setPageSize(1000).setSort(List.of(taskOrderBy));
 
     taskSearch.setPagination(pagination);
 
