@@ -25,18 +25,22 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.stream.Collectors;
 
 @Component
 @ConfigurationProperties()
 
 public class ScenarioUserTask {
-  Logger logger = LoggerFactory.getLogger(ExecuteApplication.class.getName());
+  Logger logger = LoggerFactory.getLogger(ScenarioUserTask.class.getName());
 
   private CamundaTaskListClient taskClient;
 
@@ -54,8 +58,14 @@ public class ScenarioUserTask {
   @Value("${tasklist.taskListKeycloakUrl}")
   public String taskListKeycloakUrl;
 
-  @Value("${usertaskwithresult.modeExecution:'simple'}")
+  @Value("${usertaskwithresult.modeExecution:'single'}")
   public String modeExecution;
+
+  @Value("${usertaskwithresult.pleaseLogWorker:'false'}")
+  public Boolean pleaseLogWorker;
+
+  @Value("${usertaskwithresult.pleaseLogWorker:'true'}")
+  public Boolean doubleCheck;
 
   private int numberExecution = 0;
 
@@ -67,6 +77,11 @@ public class ScenarioUserTask {
 
   List<JobWorker> listWorkers = new ArrayList<>();
 
+  Random random = new Random();
+  ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(100);
+
+  Set<Long> registerUserTask = new HashSet<>();
+
   /**
    * Initialize all environment
    */
@@ -74,7 +89,7 @@ public class ScenarioUserTask {
     if (!connectionTaskList()) {
       return;
     }
-    taskWithResult = new TaskWithResult(zeebeClient, taskClient);
+    taskWithResult = new TaskWithResult(zeebeClient, taskClient, doubleCheck);
     engineCommand = new EngineCommand(zeebeClient, taskClient);
     // create workers
     listWorkers.add(DelayWorker.registerWorker(zeebeClient));
@@ -82,18 +97,17 @@ public class ScenarioUserTask {
 
   }
 
-  @Scheduled(fixedDelay = 10000)
+  @Scheduled(fixedDelay = 30000)
   public void execute() {
 
     numberExecution++;
     try {
-      if ("simple".equals(modeExecution)) {
+      if ("single".equals(modeExecution)) {
         if (numberExecution > 1)
           return;
         executeSingleExecution();
       } else if ("multiple".equals(modeExecution)) {
-        engineCommand.createProcessInstances("executeUserTaskWithResult", 100);
-        executeSearchTask();
+        executeMultipleExecution();
       }
     } catch (Exception e) {
       logger.error("Error execution [{}]", e);
@@ -106,7 +120,9 @@ public class ScenarioUserTask {
    */
   public void executeSingleExecution() throws Exception {
     try {
-      engineCommand.createProcessInstances("executeUserTaskWithResult", 1);
+      engineCommand.createProcessInstances("executeUserTaskWithResult",
+          Map.of(LogWorker.PROCESS_VARIABLE_PLEASELOG, Boolean.TRUE, DelayWorker.PROCESS_VARIABLE_CREDITSCORE,
+              random.nextInt(1000)), 1, true);
       int loop = 0;
       while (loop < 10) {
         loop++;
@@ -120,7 +136,7 @@ public class ScenarioUserTask {
           continue;
         }
         for (Task task : taskList.getItems()) {
-          Map<String, Object> result = taskWithResult.executeTaskWithResult(task, 10000L);
+          executeOneTask(task);
         }
       }
     } catch (Exception e) {
@@ -128,26 +144,74 @@ public class ScenarioUserTask {
     }
   }
 
-  // @ S c h  eduled(fixedDelay = 2000)
-  public void executeSearchTask() {
-    logger.info("------------------- Search for userTask to run");
+  /**
+   *
+   */
+  public void executeMultipleExecution() {
+    logger.info("Synthesis {} queueSize=[{}]", statResult.getSynthesis(), registerUserTask.size());
 
-    ExecutorService executor = Executors.newFixedThreadPool(20);
-
-    TaskList tasksList = null;
     try {
+
+      if (registerUserTask.size()<10) {
+        logger.info("------------------- Create 10 process Instances");
+        engineCommand.createProcessInstances("executeUserTaskWithResult",
+            Map.of(LogWorker.PROCESS_VARIABLE_PLEASELOG, pleaseLogWorker, DelayWorker.PROCESS_VARIABLE_CREDITSCORE,
+                random.nextInt(1000)), 10, pleaseLogWorker.booleanValue());
+      }
+
+      logger.info("------------------- Search for userTask to run");
+      TaskList tasksList = null;
       tasksList = engineCommand.searchUserTask();
-      for (Task userTask : tasksList.getItems()) {
-        Callable<Map<String, Object>> taskWithResultCallable = () -> taskWithResult.executeTaskWithResult(userTask,
-            10000); // Use lambda to pass the parameter
+      // Register the task: the same task can show up multiple time because of the delay between Zee
+
+      for (Task task : tasksList.getItems()) {
+        if (registerUserTask.contains(Long.valueOf(task.getId())))
+          continue; // already executed
+        registerUserTask.add(Long.valueOf(task.getId()));
+        Callable<TaskWithResult.ExecuteWithResult> taskWithResultCallable = () -> {
+          return executeOneTask(task);
+          // Use lambda to pass the parameter
+        };
         Future future = executor.submit(taskWithResultCallable);
       }
+
+      // Ok, now we can purge the registerUserTask. If the task does not show up in the taskList, we can purge it
+      Set<Long> taskIds = tasksList.getItems().stream()
+          .map(t-> Long.valueOf(t.getId()))  // Get the ID of each Task
+          .collect(Collectors.toSet());
+      registerUserTask.retainAll(taskIds);
+
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
 
     // Each task? Let's create a unique thread to manage it with Result
 
+  }
+
+  private TaskWithResult.ExecuteWithResult executeOneTask(Task task) throws Exception {
+
+    logger.info("Play with task [{}]", task.getId());
+    long beginTimeRun = System.currentTimeMillis();
+    TaskWithResult.ExecuteWithResult executeWithResult = taskWithResult.executeTaskWithResult(task, "demo",
+        Map.of("Cake", "Cherry"), 10000L);
+
+    // Check the result now
+    if (executeWithResult.taskNotFound) {
+      return executeWithResult;
+    }
+    if (!executeWithResult.timeOut) {
+      Integer signature = (Integer) executeWithResult.processVariables.get(DelayWorker.PROCESS_VARIABLE_CREDITSCORE);
+      Integer resultCalculation = (Integer) executeWithResult.processVariables.get(
+          DelayWorker.PROCESS_VARIABLE_CALCULATION);
+      if (resultCalculation != signature.intValue() + 10)
+        logger.error("Calculation is wrong, not the expected result Signature[{}] Result[{}] (expect signature+10)",
+            signature, resultCalculation);
+
+    }
+    statResult.addResult(System.currentTimeMillis() - beginTimeRun, !executeWithResult.timeOut);
+    // Use lambda to pass the parameter
+    return executeWithResult;
   }
 
   /**
@@ -177,6 +241,28 @@ public class ScenarioUserTask {
     } catch (Exception e) {
       logger.error("------------------ Connection error to taskList {}", e);
       return false;
+    }
+  }
+
+  StatResult statResult = new StatResult();
+
+  private class StatResult {
+    public long sumExecution = 0;
+    public long badExecution = 0;
+    public long successExecution = 0;
+
+    public synchronized void addResult(long timeExecution, boolean success) {
+      if (success) {
+        sumExecution += timeExecution;
+        successExecution++;
+      } else {
+        badExecution++;
+      }
+    }
+
+    public String getSynthesis() {
+      return String.format("%1d ms average for %2d executions ",
+          successExecution / (successExecution == 0 ? 1 : successExecution), badExecution);
     }
   }
 

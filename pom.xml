@@ -17,9 +17,12 @@
     <maven.compiler.target>${java.version}</maven.compiler.target>
     <maven.compiler.source>${java.version}</maven.compiler.source>
 
+    <!-- compile and run
     <version.zeebe>8.5.7</version.zeebe>
     <version.zeebe-client>8.5.5</version.zeebe-client>
-
+-->
+    <version.zeebe>8.5.7</version.zeebe>
+    <version.zeebe-client>8.5.5</version.zeebe-client>
     <camunda7.version>7.19.0</camunda7.version>
 
     <junit.jupiter.version>5.9.1</junit.jupiter.version>
@@ -53,7 +56,8 @@
 
   <dependencies>
 
-<!--
+
+    <!-- Does not define io.camunda.common.auth.TASKLIST
     <dependency>
       <groupId>io.camunda</groupId>
       <artifactId>spring-boot-starter-camunda-sdk</artifactId>
@@ -62,18 +66,29 @@
 -->
 
 
+    <!-- autowire zeebeclient
     <dependency>
       <groupId>io.camunda.spring</groupId>
       <artifactId>spring-boot-starter-camunda</artifactId>
       <version>${version.zeebe}</version>
     </dependency>
+-->
 
+    <dependency>
+      <groupId>io.camunda</groupId>
+      <artifactId>spring-boot-starter-camunda-sdk</artifactId>
+      <version>8.6.0</version>
+    </dependency>
+
+
+
+    <!--
     <dependency>
       <groupId>io.camunda</groupId>
       <artifactId>zeebe-client-java</artifactId>
       <version>${version.zeebe-client}</version>
     </dependency>
-
+-->
 
     <dependency>
       <groupId>io.camunda</groupId>
