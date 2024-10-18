@@ -67,6 +67,8 @@ public class ScenarioUserTask {
 
   @Value("${usertaskwithresult.pleaseLogWorker:'true'}")
   public Boolean doubleCheck;
+  @Value("${usertaskwithresult.useTaskAPI:'false'}")
+  public Boolean useTaskAAPI;
 
   private int numberExecution = 0;
 
@@ -92,7 +94,7 @@ public class ScenarioUserTask {
     if (!connectionTaskList()) {
       return;
     }
-    taskWithResult = new WithResultAPI(zeebeClient, taskClient, doubleCheck);
+    taskWithResult = new WithResultAPI(zeebeClient, taskClient, doubleCheck, useTaskAAPI);
     engineCommand = new EngineCommand(zeebeClient, taskClient);
     // create workers
     listWorkers.add(DelayWorker.registerWorker(zeebeClient));
@@ -160,7 +162,7 @@ public class ScenarioUserTask {
       if (registerUserTask.size() < 10) {
         engineCommand.createProcessInstances(PROCESS_ID,
             Map.of(LogWorker.PROCESS_VARIABLE_PLEASELOG, pleaseLogWorker, DelayWorker.PROCESS_VARIABLE_CREDITSCORE,
-                random.nextInt(1000)), 20, pleaseLogWorker.booleanValue());
+                random.nextInt(1000)), 10, pleaseLogWorker.booleanValue());
       }
 
       TaskList tasksList = null;

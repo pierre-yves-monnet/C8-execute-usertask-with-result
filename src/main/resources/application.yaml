@@ -31,7 +31,8 @@ tasklist:
 
 usertaskwithresult:
   # single|multiple
-  modeExecution: multiple
+  modeExecution: single
   pleaseLogWorker: false
   doubleCheck: true
+  useTaskAPI: true
 

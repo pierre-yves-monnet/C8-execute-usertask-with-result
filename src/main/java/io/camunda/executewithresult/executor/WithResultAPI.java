@@ -26,14 +26,16 @@ public class WithResultAPI {
 
   private CamundaTaskListClient taskClient;
 
-  private boolean useUserTaskAPI = false;
+  private boolean useTaskAPI = false;
 
   HandleMarker handleMarker = new HandleMarker();
 
-  public WithResultAPI(ZeebeClient zeebeClient, CamundaTaskListClient taskClient, boolean doubleCheck) {
+  public WithResultAPI(ZeebeClient zeebeClient, CamundaTaskListClient taskClient, boolean doubleCheck,
+                       boolean useTaskAPI) {
     this.zeebeClient = zeebeClient;
     this.taskClient = taskClient;
     this.doubleCheck = doubleCheck;
+    this.useTaskAPI = useTaskAPI;
 
   }
 
@@ -81,7 +83,7 @@ public class WithResultAPI {
     ExecuteWithResult executeWithResult = new ExecuteWithResult();
 
     // save the variable jobId
-    if (useUserTaskAPI) {
+    if (useTaskAPI) {
       try {
         if (assignUser)
           taskClient.claim(userTask.getId(), userName);
