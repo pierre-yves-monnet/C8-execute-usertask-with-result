@@ -1,6 +1,4 @@
-[![Community badge: Experimental](https://img.shields.io/badge/Lifecycle-Experimental-orange)]
-(https://github.com/Camunda-Community-Hub/community/blob/main/extension-lifecycle.md#stable-)
-
+[![Community badge: Experimental](https://img.shields.io/badge/Lifecycle-Experimental-orange)
 ![Compatible with: Camunda Platform 8](https://img.shields.io/badge/Compatible%20with-Camunda%20Platform%208-0072Ce)
 
 # C8-execute-usertask-with-result
