@@ -11,4 +11,6 @@ public class ExecuteWithResult {
   public boolean timeOut = false;
   public long executionTime;
   public String processInstance;
+  // Return back the taskId where the processinstance is
+  public String taskId;
 }

@@ -111,6 +111,8 @@ public class WithResultAPI {
     logger.info("Receive answer jobKey[{}] notification? {} inprogress{}", jobKey, lockObjectTransporter.notification,
         lockObjectsMap.size());
 
+    // retrieve the taskId where the currentprocess instance is
+    executeWithResult.taskId = lockObjectTransporter.taskId;
     // we got the result
     // we can close the worker now
     worker.close();
@@ -178,6 +180,7 @@ return null;
         return;
       }
       lockObjectTransporter.processVariables = activatedJob.getVariablesAsMap();
+      lockObjectTransporter.taskId =activatedJob.getElementId();
       logger.debug("HandleMarker jobKey[{}] variables[{}]", jobKey, lockObjectTransporter.processVariables);
 
       // Notify the thread waiting on this item
@@ -189,6 +192,7 @@ return null;
     public String jobKey;
     // With result will return the process variable here
     public Map<String, Object> processVariables;
+    public String taskId;
 
     public boolean notification = false;
 
