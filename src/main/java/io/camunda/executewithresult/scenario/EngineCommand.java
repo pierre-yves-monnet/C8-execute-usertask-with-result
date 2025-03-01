@@ -8,6 +8,12 @@ import io.camunda.tasklist.dto.TaskState;
 import io.camunda.tasklist.exception.TaskListException;
 import io.camunda.tasklist.generated.model.TaskOrderBy;
 import io.camunda.zeebe.client.ZeebeClient;
+import io.camunda.zeebe.client.api.response.ProcessInstanceEvent;
+import io.camunda.zeebe.client.api.search.query.UserTaskQuery;
+import io.camunda.zeebe.client.api.search.response.SearchQueryResponse;
+import io.camunda.zeebe.client.api.search.response.UserTask;
+import io.camunda.zeebe.client.impl.search.filter.UserTaskFilterImpl;
+import io.camunda.zeebe.engine.state.immutable.UserTaskState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,9 +23,9 @@ import java.util.Map;
 public class EngineCommand {
   Logger logger = LoggerFactory.getLogger(EngineCommand.class.getName());
 
-  private ZeebeClient zeebeClient;
+  private final ZeebeClient zeebeClient;
 
-  private CamundaTaskListClient taskClient;
+  private final CamundaTaskListClient taskClient;
 
   public EngineCommand(ZeebeClient zeebeClient, CamundaTaskListClient taskClient) {
     this.zeebeClient = zeebeClient;
@@ -45,7 +51,29 @@ public class EngineCommand {
     logger.info("Created {} process instance sent", number);
   }
 
-  public TaskList searchUserTask(String processID) {
+  /**
+   * create one process instance and return it
+   * @param processId processId to create the process instance
+   * @param variables process variable
+   * @return the process instance
+   */
+  public ProcessInstanceEvent createProcessInstancesWithResult(String processId, Map<String, Object> variables) {
+
+      ProcessInstanceEvent processInstance = zeebeClient.newCreateInstanceCommand() //
+              .bpmnProcessId(processId).latestVersion() //
+              .variables(variables) //
+              .send().join();
+
+    logger.info("Created process instance {} ", processInstance.getProcessInstanceKey());
+    return processInstance;
+  }
+
+  /**
+   * Search user task using the AccessTaskAPI
+   * @param processID processId to search (not working for the moment)
+   * @return TaskList
+   */
+  public TaskList searchUserTaskWithTaskList(String processID) {
     // logger.info("------------------- Search for userTask to run");
     TaskSearch taskSearch = new TaskSearch();
     taskSearch.setState(TaskState.CREATED);
@@ -60,7 +88,6 @@ public class EngineCommand {
 
     taskSearch.setPagination(pagination);
 
-    TaskList tasksList = null;
     try {
       return taskClient.getTasks(taskSearch);
     } catch (TaskListException e) {
@@ -68,4 +95,17 @@ public class EngineCommand {
     }
   }
 
+  /**
+   * Ask the Zeebe engine to return the list of task
+   * Visit https://docs.camunda.io/docs/apis-tools/camunda-api-rest/specifications/query-user-tasks-alpha/
+   * @param processInstanceKey processid to query
+   * @return the list of task
+   */
+  public List<UserTask> searchUserTaskWithZeebe(Long processInstanceKey) {
+    UserTaskQuery userTaskQuery=zeebeClient.newUserTaskQuery();
+    // userTaskQuery.filter( new UserTaskFilterImpl().processInstanceKey(processInstanceKey));
+    SearchQueryResponse<UserTask> result = userTaskQuery.send().join();
+    return result.items();
+
+  }
 }

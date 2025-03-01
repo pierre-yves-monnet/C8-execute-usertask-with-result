@@ -1,217 +1,116 @@
 package io.camunda.executewithresult.executor;
 
-import io.camunda.tasklist.CamundaTaskListClient;
-import io.camunda.tasklist.dto.Task;
-import io.camunda.zeebe.client.ZeebeClient;
+
 import io.camunda.zeebe.client.api.response.ActivatedJob;
 import io.camunda.zeebe.client.api.worker.JobClient;
 import io.camunda.zeebe.client.api.worker.JobHandler;
-import io.camunda.zeebe.client.api.worker.JobWorker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 
-public class WithResultAPI {
-  Logger logger = LoggerFactory.getLogger(WithResultAPI.class.getName());
+public abstract class WithResultAPI {
 
-  private final static String PROCESS_VARIABLE_SNITCH = "SNITCH";
+    Logger logger = LoggerFactory.getLogger(WithResultAPITaskList.class.getName());
 
-  private boolean doubleCheck = true;
-  Random random = new Random();
+    protected HandleMarker handleMarker = new HandleMarker();
 
-  private ZeebeClient zeebeClient;
+    /**
+     * Do not instantiate this class. Create a WithResultAPITaskList or WithResultAPIZeebe
+     */
+    protected void WithResultAPI() {
 
-  private CamundaTaskListClient taskClient;
-
-  private boolean useTaskAPI = false;
-
-  HandleMarker handleMarker = new HandleMarker();
-
-  public WithResultAPI(ZeebeClient zeebeClient, CamundaTaskListClient taskClient, boolean doubleCheck,
-                       boolean useTaskAPI) {
-    this.zeebeClient = zeebeClient;
-    this.taskClient = taskClient;
-    this.doubleCheck = doubleCheck;
-    this.useTaskAPI = useTaskAPI;
-
-  }
-
-  /**
-   * executeTaskWithResult
-   *
-   * @param userTask            user task to execute
-   * @param assignUser          the user wasn't assign to the user task, so do it
-   * @param userName            userName to execute the user task
-   * @param variables           Variables to update the task at completion
-   * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
-   * @return the result variable
-   * @throws Exception
-   */
-  public ExecuteWithResult executeTaskWithResult(Task userTask,
-                                                 boolean assignUser,
-                                                 String userName,
-                                                 Map<String, Object> variables,
-                                                 long timeoutDurationInMs) throws Exception {
-    // We need to create a unique ID
-    Long beginTime = System.currentTimeMillis();
-    String jobKey = userTask.getId();
-
-    logger.debug("ExecuteTaskWithResult[{}]", jobKey);
-    int snitchValue = random.nextInt(10000);
-
-    LockObjectTransporter lockObjectTransporter = new LockObjectTransporter();
-    lockObjectTransporter.jobKey = jobKey;
-    synchronized (lockObjectsMap) {
-      lockObjectsMap.put(jobKey, lockObjectTransporter);
-    }
-    // Now, create a worker just for this jobKey
-    logger.debug("Register worker[{}]", "end-result-" + jobKey);
-    JobWorker worker = zeebeClient.newWorker()
-        .jobType("end-result-" + jobKey)
-        .handler(handleMarker)
-        .streamEnabled(true)
-        .open();
-
-    Map<String, Object> userVariables = new HashMap<>();
-    userVariables.put("jobKey", jobKey);
-    userVariables.putAll(variables);
-    if (doubleCheck)
-      userVariables.put(PROCESS_VARIABLE_SNITCH, snitchValue);
-    ExecuteWithResult executeWithResult = new ExecuteWithResult();
-
-    // save the variable jobId
-    if (useTaskAPI) {
-      try {
-        if (assignUser)
-          taskClient.claim(userTask.getId(), userName);
-        taskClient.completeTask(userTask.getId(), userVariables);
-      } catch (Exception e) {
-        logger.error("Can't complete Task [{}] : {}", userTask.getId(), e);
-        executeWithResult.taskNotFound = true;
-        return executeWithResult;
-      }
-    } else {
-      try {
-        if (assignUser)
-          zeebeClient.newUserTaskAssignCommand(Long.valueOf(userTask.getId())).assignee("demo").send().join();
-        zeebeClient.newUserTaskCompleteCommand(Long.valueOf(userTask.getId())).variables(userVariables).send().join();
-      } catch (Exception e) {
-        logger.error("Can't complete Task [{}] : {}", userTask.getId(), e);
-        executeWithResult.taskNotFound = true;
-        return executeWithResult;
-      }
     }
 
-    // Now, we block the thread and wait for a result
-    lockObjectTransporter.waitForResult(timeoutDurationInMs);
 
-    logger.info("Receive answer jobKey[{}] notification? {} inprogress{}", jobKey, lockObjectTransporter.notification,
-        lockObjectsMap.size());
+    /**
+     * Execute a task and wait for the result. Result is a mark by a worker in the process
+     * @param userTaskKey User task Key
+     * @param processInstanceKey ProcessInstancekey
+     * @param assignUser true if the user must be assigned before
+     * @param userName username, if assignUser is true
+     * @param variables variables to update
+     * @param timeoutDurationInMs lock duration. If the duration is over this time, return with executionWithResult.timeout=true
+     * @return the result information
+     * @throws Exception if a command failed
+     */
+    public abstract ExecuteWithResult executeTaskWithResult(Long userTaskKey,
+                                                   Long processInstanceKey,
+                                                   boolean assignUser,
+                                                   String userName,
+                                                   Map<String, Object> variables,
+                                                   long timeoutDurationInMs) throws Exception;
 
-    // retrieve the taskId where the currentprocess instance is
-    executeWithResult.taskId = lockObjectTransporter.taskId;
-    // we got the result
-    // we can close the worker now
-    worker.close();
-    synchronized (lockObjectsMap) {
-      lockObjectsMap.remove(jobKey);
+
+
+        /**
+         * processInstanceWithResult
+         *
+         * @param processId           processId to start
+         * @param variables           Variables to update the task at completion
+         * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
+         * @return the result status
+         * @throws Exception
+         */
+    public ExecuteWithResult processInstanceWithResult(String processId,
+                                                       Map<String, Object> variables,
+                                                       long timeoutDurationInMs) throws Exception {
+        // To be done
+        return null;
     }
 
-    Long endTime = System.currentTimeMillis();
-    executeWithResult.processInstance = userTask.getProcessInstanceKey();
-    executeWithResult.executionTime = endTime - beginTime;
+    /**
+     * Handle the job. This worker register under the correct topic, and capture when it's come here
+     */
+    private class HandleMarker implements JobHandler {
+        public void handle(JobClient jobClient, ActivatedJob activatedJob) throws Exception {
+            // Get the variable "lockKey"
+            String jobKey = (String) activatedJob.getVariable("jobKey");
+            logger.info("Handle marker for jobKey[{}]", jobKey);
+            LockObjectTransporter lockObjectTransporter = lockObjectsMap.get(jobKey);
 
-    if (lockObjectTransporter.notification) {
-      executeWithResult.timeOut = false;
-      executeWithResult.processVariables = lockObjectTransporter.processVariables;
-      String doubleCheckAnalysis = "";
-      if (doubleCheck) {
-        String jobKeyProcess = (String) lockObjectTransporter.processVariables.get("jobKey");
-        Integer snitchProcess = (Integer) lockObjectTransporter.processVariables.get(PROCESS_VARIABLE_SNITCH);
-        doubleCheckAnalysis = snitchProcess == null || !snitchProcess.equals(snitchValue) ?
-            String.format("Snitch_Different(snitch[%1] SnichProcess[%2])", snitchValue, snitchProcess) :
-            "Snitch_marker_OK";
-      }
-      logger.debug("RESULT JobKey[{}] in {} ms (timeout {} ms) Pid[{}] {} variables[{}]", jobKey, endTime - beginTime,
-          timeoutDurationInMs, userTask.getProcessInstanceKey(), doubleCheckAnalysis,
-          lockObjectTransporter.processVariables);
-    } else {
-      executeWithResult.timeOut = true;
-      executeWithResult.processVariables = null;
+            if (lockObjectTransporter == null) {
+                logger.error("No object for jobKey[{}]", jobKey);
+                return;
+            }
+            lockObjectTransporter.processVariables = activatedJob.getVariablesAsMap();
+            lockObjectTransporter.taskId = activatedJob.getElementId();
+            logger.debug("HandleMarker jobKey[{}] variables[{}]", jobKey, lockObjectTransporter.processVariables);
 
-      logger.debug("RESULT TIMEOUT  JobKey[{}]  in {} ms (timeout {} ms) Pid[{}] ", jobKey, endTime - beginTime,
-          timeoutDurationInMs, userTask.getProcessInstanceKey());
+            // Notify the thread waiting on this item
+            lockObjectTransporter.notifyResult();
+        }
     }
 
-    return executeWithResult;
-  }
-
-  /**
-   * processInstanceWithResult
-   *
-   * @param processId           processId to start
-   * @param variables           Variables to update the task at completion
-   * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
-   * @return the result status
-   * @throws Exception
-   */
-  public ExecuteWithResult processInstanceWithResult(String processId,
-                                                     Map<String, Object> variables,
-                                                     long timeoutDurationInMs) throws Exception {
-    // To be done
-return null;
-  }
-
-  /**
-   * Handle the job. This worker register under the correct topic, and capture when it's come here
-   */
-  private class HandleMarker implements JobHandler {
-    public void handle(JobClient jobClient, ActivatedJob activatedJob) throws Exception {
-      // Get the variable "lockKey"
-      String jobKey = (String) activatedJob.getVariable("jobKey");
-      logger.info("Handle marker for jobKey[{}]", jobKey);
-      LockObjectTransporter lockObjectTransporter = lockObjectsMap.get(jobKey);
-
-      if (lockObjectTransporter == null) {
-        logger.error("No object for jobKey[{}]", jobKey);
-        return;
-      }
-      lockObjectTransporter.processVariables = activatedJob.getVariablesAsMap();
-      lockObjectTransporter.taskId =activatedJob.getElementId();
-      logger.debug("HandleMarker jobKey[{}] variables[{}]", jobKey, lockObjectTransporter.processVariables);
-
-      // Notify the thread waiting on this item
-      lockObjectTransporter.notifyResult();
-    }
-  }
-
-  private class LockObjectTransporter {
-    public String jobKey;
-    // With result will return the process variable here
-    public Map<String, Object> processVariables;
-    public String taskId;
-
-    public boolean notification = false;
-
-    public synchronized void waitForResult(long timeoutDurationInMs) {
-      try {
-        logger.debug("Wait on object[{}]", this);
-        wait(timeoutDurationInMs);
-      } catch (InterruptedException e) {
-        logger.error("Can' wait ", e);
-      }
+    protected LockObjectTransporter createLockObjectTransporter() {
+        return new WithResultAPI.LockObjectTransporter();
     }
 
-    public synchronized void notifyResult() {
-      logger.debug("Notify on object[{}]", this);
-      notification = true;
-      notify();
-    }
-  }
+    protected class LockObjectTransporter {
+        public Long jobKey;
+        // With result will return the process variable here
+        public Map<String, Object> processVariables;
+        public String taskId;
 
-  static Map<String, LockObjectTransporter> lockObjectsMap = new HashMap<>();
+        public boolean notification = false;
+
+        public synchronized void waitForResult(long timeoutDurationInMs) {
+            try {
+                logger.debug("Wait on object[{}]", this);
+                wait(timeoutDurationInMs);
+            } catch (InterruptedException e) {
+                logger.error("Can' wait ", e);
+            }
+        }
+
+        public synchronized void notifyResult() {
+            logger.debug("Notify on object[{}]", this);
+            notification = true;
+            notify();
+        }
+    }
+
+    static Map<Long, LockObjectTransporter> lockObjectsMap = new HashMap<>();
 
 }

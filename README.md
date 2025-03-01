@@ -21,6 +21,15 @@ Note: for the second user, an API "createWithResult" exist, but this API has two
 * it waits until the end of the process, not until the process reach a milestone
 * if the execution is over the duration timeout, it returns an exception, and not the process instance created. It you want to cancel the process instance because it's too long, then it is not possible.
 
+# Two implementations
+
+Two implementation are available:
+
+* WithResultAPITaskList. This implementation use the TaskList API to claim and execute the task, and in the ScenarioUserTask method, TaskList is used to search the task
+* WithResultAPIZeebe : the new Zeebe API is used (https://docs.camunda.io/docs/apis-tools/camunda-api-rest/specifications/query-user-tasks-alpha/)
+
+Attention, to use the new ZeebeAPI, `CAMUNDA_REST_QUERY_ENABLED` must be set to "true", and the port 8080 must be accessible.
+
 
 # User Task With Result
 A user task is present in the process, and the application want to call an API which will wait until the process instance pass the task "log".

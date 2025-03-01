@@ -10,7 +10,7 @@ public class ExecuteWithResult {
   public boolean taskNotFound = false;
   public boolean timeOut = false;
   public long executionTime;
-  public String processInstance;
+  public Long processInstanceKey;
   // Return back the taskId where the processinstance is
   public String taskId;
 }
