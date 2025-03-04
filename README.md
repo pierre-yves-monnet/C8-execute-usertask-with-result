@@ -5,48 +5,48 @@
 
 # Principle
 
-Via the API, when a call to "execute a user task" is perform, the API send the command and give back the control.
+When a call to "execute a user task" is made via the API, the API sends the command and gives back the control.
 The execution is done asynchronously by Zeebe.
 
-Imagine you want to block the thread during this execution, waiting until the process reach a point in the process.
-For example, the process call a service to book a ticket for a concert, and you want to give back the result of the reservation to the API.
-The thread must be block, waiting for this point, and then collect the process variable (the reservation number).
+Imagine you want to block the thread during this execution, waiting until the process reaches a certain point.
+For example, the process calls a service to book a concert ticket, and you want to give the reservation result back to the API.
+The thread must be blocked while waiting for this point, and then the process variable (reservation number) must be collected.
 
-This is the role of this library.
-There is two use case:
-* after a user task, block the thread and wait for a certain point in the process
-* after a task creation, block the thread.
+It is the role of this library.
+There are two use cases:
+* After a user task, block the thread and wait for a certain point in the process
+* After a task is created, block the thread.
 
-Note: for the second user, an API "createWithResult" exist, but this API has two limitations:
-* it waits until the end of the process, not until the process reach a milestone
-* if the execution is over the duration timeout, it returns an exception, and not the process instance created. It you want to cancel the process instance because it's too long, then it is not possible.
+Note: for the second user, an API "createWithResult" exists, but this API has two limitations:
+* it waits until the end of the process, not until the process reaches a milestone
+* if the execution is over the duration timeout, it returns an exception and not the process instance created. If you want to cancel the process instance because it's too long, it is impossible.
 
 # Two implementations
 
-Two implementation are available:
+Two implementations are available:
 
-* WithResultAPITaskList. This implementation use the TaskList API to claim and execute the task, and in the ScenarioUserTask method, TaskList is used to search the task
+* WithResultAPITaskList. This implementation uses the TaskList API to claim and execute the task, and in the ScenarioUserTask method, TaskList is used to search the task
 * WithResultAPIZeebe : the new Zeebe API is used (https://docs.camunda.io/docs/apis-tools/camunda-api-rest/specifications/query-user-tasks-alpha/)
 
-Attention, to use the new ZeebeAPI, `CAMUNDA_REST_QUERY_ENABLED` must be set to "true", and the port 8080 must be accessible.
+Attention: To use the new ZeebeAPI, `CAMUNDA_REST_QUERY_ENABLED` must be set to "true," and port 8080 must be accessible.
 
 
 # User Task With Result
-A user task is present in the process, and the application want to call an API which will wait until the process instance pass the task "log".
+A user task is present in the process, and the application wants to call an API that will wait until the process instance passes the task "log."
 
 ![ProcessExampleUserTaskWithResult.png](doc/ProcessExampleUserTaskWithResult.png)
 
-The API is 
+The API is
 
 ```java
  /**
    * executeTaskWithResult
    *
    * @param userTask            user task to execute
-   * @param assignUser          the user wasn't assign to the user task, so do it
+   * @param assignUser          the user wasn't assigned to the user task, so do it
    * @param userName            userName to execute the user task
    * @param variables           Variables to update the task at completion
-   * @param timeoutDurationInMs maximum duration time, after the ExceptionWithResult.timeOut is true
+   * @param timeoutDurationInMs maximum duration time after the ExceptionWithResult.timeOut is true
    * @return the process variable
    * @throws Exception
    */
@@ -70,16 +70,30 @@ TaskWithResult.ExecuteWithResult executeWithResult = taskWithResult.executeTaskW
 
 ## How to instrument the process
 
-A marker must be place when the result should return. A service task (or a listener in 8.6 or after) is placed in the process.
-It must register the type 
+A marker must be placed when the result should return. A BPMN Send Message task, a service task, or a listener in 8.6 or after is placed in the process.
+It must register the type
 ```feel
 "end-result-"+jobKey
 ```
 
 ![InstrumentTask.png](doc/InstrumentTask.png)
 
+
+*Different implementation*
+The choice of implementation matters.
+
+* BPMN Send Message: this is the most appropriate event. From the process point of view, you send a message to another application.
+  To add a boundary timer event (see below), you need to use the Task Send Message. A Send Message requires the implementation of a worker.
+
+* Service task: The implementation requires a worker to do it, too. The return is visible in the diagram. A Boundary Timer Event can be added too (see below)
+
+* Listener: The listener is interested because the implementation is not directly visible in the process.
+  It may be interesting from a business point of view, considering this is a technical implementation, not a business need. Attention: The START listener blocks the Boundary Timer Event.
+  An END listener must be used.
+
+
 ## How it's work
-In Zeebe, the call is asynchronous. So when the Zeebe API `completeTask`is call, the thread is free and continue the execution.
+In Zeebe, the call is asynchronous. So when the Zeebe API `completeTask` is called, the thread is free and can continue the execution.
 
 So, the idea is to block it on an object
 ```java
@@ -87,7 +101,7 @@ So, the idea is to block it on an object
     lockObjectTransporter.waitForResult(timeoutDurationInMs);
 ```
 
-This object is created just before, and saved in a Map. The key is the jobKey, which is unique.
+This object was created just before and saved in a map. The Key is the `jobKey`, which is unique.
 ```java
  LockObjectTransporter lockObjectTransporter = new LockObjectTransporter();
     lockObjectTransporter.jobKey = jobKey;
@@ -118,11 +132,11 @@ The object is notified in the worker:
     }
 ```
 
-When the worker is activated, it must retrieve the waiting object in the Map. The `jobKey`must be pass as a process variable.
+When activated, the worker must retrieve the waiting object in the Map—the `jobKey` must be passed as a process variable.
 
-We need to activate the handler call specifically: To be sure this is on the same java machine. This method can be implemented in an application which is deployed in a replica.
-So, to ensure that, the worker is dynamic. The topic contains the job Key, and the method register the new worker
-
+We need to activate the handler call to ensure this is on the same Java machine. This method can be implemented in an application deployed in a replica.
+The topic contains the job Key to ensure the worker is dynamic and the method for registering the new worker.
+.
 ```java
    JobWorker worker = zeebeClient.newWorker()
         .jobType("end-result-" + jobKey)
@@ -130,17 +144,41 @@ So, to ensure that, the worker is dynamic. The topic contains the job Key, and t
         .streamEnabled(true)
         .open();
 ```
-This is why the topic is contains the jobKey in the topic. So, the same java machine will run the worker.
+This is why the topic contains the `jobKey`. The worker will run on the same Java machine.
 
-The second advantage is on the execution time. Instead to have one worker running handle all the management, there is now one worker per execution. 
-The worker will be notified faster by this way, when the process instance reach the task.
+The second advantage is in execution time. Instead of having one worker running the entire management, there is one worker per execution.
+The worker will be notified faster when the process instance reaches the task.
 
+# Scalability
+This implementation is scalable. If multiple pods are using this implementation because the pod that executes the API generates a unique number and starts the worker on this number,
+you can be sure the same pod will execute it and unlock the API.
 
-# Create process instance with result
+# Weakness of the implementation
+The process instance is waiting for a worker and a unique worker due to the job type, which contains a unique number. If the pod that sends the request dies,
+the worker will never be executed. Even if the pod restarts, it does not know which worker it has to recreate.
+The process instance will be blocked forever.
+
+To avoid that, a boundary timer event must be placed on the service task or the BPMN Send Task. The boundary event will unblock the process instance.
+
+![Timer Boundary Event](doc/TimerBoundaryEventOnTask.png)
+
+> Attention: A START listener blocks the service task forever, and the Boundary timer event has no impact on it. The timer event can unblock an END listener.
+
+# Create a process instance with the result
 
 The same behavior can be implemented for the Create process instance.
-The advantage between the ZeebeAPI with Result are:
-* ZeebeAPI withResult waits for the end of the process instance. This mechanism can be place in the process, and will trigger when the process instance reach the marker, not at the end of the process instance
-* If the timeout fire, ZeebeAPI return an exception, without the process instance created. If the use case is to cancel the process instance because it take too much time, this is not possible. This API will send back the process instance created.
+The advantages between the ZeebeAPI and the Result are:
+* ZeebeAPI withResult waits for the end of the process instance. This mechanism can be placed in the process and will trigger when the process instance reaches the marker, not at the end of the process instance
+* If the timeout fires, ZeebeAPI will return an exception without creating the process instance. If the use case is to cancel the process instance because it takes too much time, this is not possible. This API will send back the process instance created.
 
 Note: this implementation is not done at this moment
+
+
+# Demonstrate
+
+Deploy processes `ExecuteUserTaskWithResult.bpmn` (located under `src/test/resources`).
+
+Start the "io.camunda.executewithresult.ExecuteApplication" Spring boot application.
+
+This application will execute "io.camunda.executewithresult.scenario.ScenarioUseTask". According the `modeExecution` stored in the Yaml file under the variable `usertaskwithresult.modeExecution`, it will run differenc scenario.
+

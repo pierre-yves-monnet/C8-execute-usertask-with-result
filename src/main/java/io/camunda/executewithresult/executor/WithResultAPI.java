@@ -66,7 +66,7 @@ public abstract class WithResultAPI {
     private class HandleMarker implements JobHandler {
         public void handle(JobClient jobClient, ActivatedJob activatedJob) throws Exception {
             // Get the variable "lockKey"
-            String jobKey = (String) activatedJob.getVariable("jobKey");
+            Long jobKey = (Long) activatedJob.getVariable("jobKey");
             logger.info("Handle marker for jobKey[{}]", jobKey);
             LockObjectTransporter lockObjectTransporter = lockObjectsMap.get(jobKey);
 

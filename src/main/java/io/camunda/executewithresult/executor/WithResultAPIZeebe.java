@@ -82,7 +82,7 @@ public class WithResultAPIZeebe extends WithResultAPI {
                     zeebeClient.newUserTaskAssignCommand(userTaskKey).assignee("demo").send().join();
                 zeebeClient.newUserTaskCompleteCommand(userTaskKey).variables(userVariables).send().join();
             } catch (Exception e) {
-                logger.error("Can't complete Task [{}] : {}", userTaskKey, e);
+                logger.error("Can't complete Task [{}] : {}", userTaskKey, e.getMessage());
                 executeWithResult.taskNotFound = true;
                 return executeWithResult;
             }

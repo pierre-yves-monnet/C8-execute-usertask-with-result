@@ -167,7 +167,7 @@ public class ScenarioUserTask {
             int loop = 0;
             while (loop < 10) {
                 loop++;
-                List<UserTask> taskList = engineCommand.searchUserTaskWithZeebe(processInstance.getProcessInstanceKey());
+                List<UserTask> taskList = engineCommand.searchUserTaskWithZeebe(processInstance.getProcessInstanceKey(), "Activity_StartTheGame");
                 logger.info("Search userTask, found {} tasks - {}/10", taskList.size(), loop);
                 if (taskList.isEmpty()) {
                     try {
@@ -176,6 +176,10 @@ public class ScenarioUserTask {
                         throw new RuntimeException(e);
                     }
                     continue;
+                }
+                // logs
+                for (UserTask task : taskList) {
+                    logger.info("TaskKey[{}] Name[{}] ProcessInstance[{}] ", task.getKey(), task.getElementId(), task.getProcessInstanceKey());
                 }
                 for (UserTask task : taskList) {
                     executeOneTask(AccessTaskAPI.ZEEBE, task.getKey(), task.getProcessInstanceKey());
@@ -248,14 +252,14 @@ public class ScenarioUserTask {
         WithResultAPI taskWithResult=null;
         if (accessTaskAPI == AccessTaskAPI.TASKLIST) {
             taskWithResult = new WithResultAPITaskList(zeebeClient, taskClient, doubleCheck);
-            logger.info("Play with task from TaskList [{}]", userTaskKey);
+            logger.info("Play with task from TaskList TaskKey[{}] processInstanceKey[{}]", userTaskKey, processInstanceKey);
         }
         else if (accessTaskAPI == AccessTaskAPI.ZEEBE) {
-            taskWithResult = new WithResultAPITaskList(zeebeClient, taskClient, doubleCheck);
-            logger.info("Play with task from Zeebe [{}]", userTaskKey);
+            taskWithResult = new WithResultAPIZeebe(zeebeClient, doubleCheck);
+            logger.info("Play with task from Zeebe TaskKey[{}] processInstanceKey[{}]", userTaskKey, processInstanceKey);
         }
         else
-            throw new Exception("Unknow API");
+            throw new Exception("Unknown API");
 
 
         long beginTimeRun = System.currentTimeMillis();
